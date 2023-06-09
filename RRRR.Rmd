@@ -1,0 +1,493 @@
+---
+title: 'Netflix Veri Setinde Analiz ve Görselleştirme Üzerine Uygulamalar '
+author: "Ayşe Salı"
+
+output:
+ html_document:
+ 
+date: "2023-05-23"
+---
+
+```{r setup-chunk}
+knitr::opts_chunk$set(dev = "svg")
+```
+
+## Paketler 
+
+```{r}
+library(tidyverse)
+library(magrittr)
+library(funModeling)
+library(DataExplorer)
+library(maps)
+library(plotly)
+library(DT)
+library(tidytext)
+library(gridExtra)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(tidyr)
+library(tokenizers)
+library(wordcloud)
+library(naniar)
+```
+
+
+Datasetini içeri aktaralım.
+
+```{r}
+library(readr)
+netflix <- read_csv("C:/Users/ayses/Desktop/netflix.csv")
+View(netflix)
+
+```
+
+Veri setini hızlıca bir gözden geçirelim: 
+
+```{r}
+summary(netflix)
+```
+
+```{r}
+head(netflix,7)
+tail(netflix,7)
+
+```
+
+
+plot_intro() fonksiyonu ile  veri seti hakkında bir giriş grafiği oluşturalım.
+
+```{r}
+plot_intro(netflix)
+
+```
+
+EKsik verileri inceleyelim:
+
+
+```{r}
+gg_miss_upset(netflix)
+
+```
+Bu veri setinde : 
+
+. director, cast, country, date_added ve rating eksik değerler içermektedir.
+. director en fazla kayıp değere sahiptir.
+. Hem yönetmen hem de ülkenin birlikte eksik değerlere sahip olduğu 242 vaka vardır.
+. Hem yönetmen hem de oyuncu kadrosunun birlikte eksik değerlere sahip olduğu 241 vaka vardır.
+. Yönetmen, oyuncular ve ülkenin birlikte eksik değerlere sahip olduğu 58 vaka vardır.
+. Hem oyuncu kadrosu hem de ülkenin birlikte eksik değerlere sahip olduğu 38 durum bulunmaktadır
+
+
+```{r}
+df_status(netflix)
+d_na <- df_status(netflix)
+d_na[,c("variable","p_na")] #degiskenlerdeki eksik degerlerin yuzdesini getirme
+
+df<-netflix
+df$country<-NULL 
+#Eger cok yuksek oranda eksık gozlem varsa o degiskeni silmek icin 
+
+```
+
+
+## Filmler ve Tv programlarının oranı
+
+```{r}
+library(ggplot2)
+
+netflix %>%
+  count(type, sort = TRUE) %>%
+  mutate(prop = n / sum(n) * 100) %>%
+  ggplot(aes(x = "", y = prop, fill = type)) +
+  geom_bar(
+    stat = "identity",
+    width = 1,
+    color = "black",
+    size = 1
+  ) +
+  coord_polar("y", start = 0) +
+  geom_text(
+    aes(y = prop, label = paste0(round(prop), "%")),
+    position = position_stack(vjust = 0.5),
+    size = 6,
+    col = "black",
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = c('lightblue', 'pink')) +
+  theme_void() +
+  labs(
+    title = "Netflix'teki filmler TV programlarından daha mı fazla?",
+    subtitle = "Pasta grafiği, Filmlerin TV şovlarına oranı",
+    caption = "Kaggle: Netflix Movies and TV Shows",
+    fill = ""
+  ) +
+  theme(legend.position = "bottom") +
+  coord_polar("y", start = 0) +
+  ylim(0, 100)
+
+```
+
+
+## Filmler ve tv programlarının sayısı
+
+```{r}
+
+netflix %>% 
+  ggplot(aes(type,fill=type)) + 
+  geom_bar()+
+  scale_fill_brewer(palette='Pastel2')+
+  coord_flip() +
+  geom_text(stat='count',aes(label=..count..),hjust=1.5)
+```
+
+
+
+### Type değişkeni üzerine incelemeler
+
+```{r}
+netflix %>% select(rating, type) %>%
+  filter(!is.na(rating)) %>%
+# Eksik verileri filtrele
+  mutate(rating = fct_lump(rating, 5)) %>%
+  group_by(rating, type) %>%
+  summarise(Count = n()) %>%
+  arrange(Count) %>%
+  plot_ly(
+    x = ~ type ,
+    y = ~ Count,
+    type = "bar",
+    color = ~ rating,
+    text = ~ Count,
+    textposition = 'outside',
+    textfont = list(color = '#000000', size = 12)
+  ) %>%
+  layout(yaxis = list(categoryorder = "array",
+                      categoryarray = ~ Count)) %>%
+  layout(
+    title = "Rating by Type",
+    yaxis = list(title = "Type"),
+    xaxis = list(title = "Count"),
+    legend = list(title = list(text = '<b> Rating </b>'))
+  )
+```
+
+
+Filmlerin ve Tv Şovlarının çoğunu TV-MA oluşturmaktadır.
+
+Raiting kategorisi için:
+  
+
+TV-MA: 17 yaşın altındaki hiç kimse tarafından izlenmemelidir.
+
+TV-14: 14 yaşından küçükler tarafından izlenmemelidir.
+
+TV-PG: Bir şovun daha genç izleyiciler tarafından izlenebileceği ancak ebeveynleri odada olmadan izlenmemesi gerektiği anlamına gelir.
+
+PG-13: Ebeveynler Şiddetle Dikkat Etmelidir, Bazı Materyaller 13 Yaşından Küçük Çocuklar İçin Uygunsuz Olabilir.
+
+R: Kısıtlı, 17 Yaşından Küçük Çocukların Yanında Ebeveyn veya Yetişkin Vasi Gerektirir.
+
+
+
+
+### Tv Showları üzerine inceleme:
+
+```{r}
+netflix %>% 
+  filter(type=='TV Show') %>% 
+  group_by(rating) %>% 
+  summarise(countt=n()) %>% 
+  plot_ly(labels=~rating,
+          values=~countt,
+          textinfo='label+percent') %>% 
+  add_pie(hole=0.6)
+```
+
+Tv showlarının sezon bilgilerine bir göz atalım.
+
+```{r}
+tv_dura <- netflix %>% 
+  filter(type=='TV Show') %>% 
+  group_by(duration) %>% 
+  count(sort=TRUE)
+
+tv_d <- tv_dura$duration
+tv_d <- factor(tv_d, levels = tv_d)
+
+tv_dura %>% 
+  mutate(duration = factor(duration, levels = tv_d)) %>% 
+  plot_ly(x = ~duration,
+          y = ~n,
+          type = 'bar',
+          text = ~n,
+          textposition = 'outside') %>%
+  layout(title = "TV Dizi Süreleri",
+         xaxis = list(title = "Süre"),
+         yaxis = list(title = "Sayı"))
+
+```
+
+
+### Movie üzerine inceleme:
+
+```{r}
+netflix %>% 
+  filter(type=='Movie') %>% 
+  group_by(rating) %>% 
+  summarise(countt=n()) %>% 
+  plot_ly(labels=~rating,
+          values=~countt,
+          textinfo='label+percent') %>% 
+  add_pie(hole=0.6)
+```
+
+
+"rating" değerlerini PG-13, R, TV-14, TV-MA, TV-PG ve Other olmak üzere 6 kategori oluşturalım.
+
+```{r}
+
+netflix_df <- netflix %>%
+  mutate(rating_category = case_when(
+    rating %in% c("PG-13") ~ "PG-13",
+    rating %in% c("R") ~ "R",
+    rating %in% c("TV-14") ~ "TV-14",
+    rating %in% c("TV-MA") ~ "TV-MA",
+    rating %in% c("TV-PG") ~ "TV-PG",
+    TRUE ~ "Other"
+  ))
+
+
+```
+
+### Program Süreleri
+
+```{r}
+
+# TV Show için süre dağılımı
+tv_show_duration <- netflix_df %>%
+  filter(type == "TV Show") %>%
+  select(duration) %>%
+  count(duration, sort = TRUE)
+
+# Movie için süre dağılımı
+movie_duration <- netflix_df %>%
+  filter(type == "Movie") %>%
+  select(duration) %>%
+  count(duration, sort = TRUE)
+
+# TV Show için süre dağılımı grafiği
+ggplot(tv_show_duration, aes(x = as.factor(duration), y = n, label = n)) +
+  geom_col(fill = "darkblue") +
+  geom_text(vjust = -0.5, size = 3, col = "white") +
+  theme_minimal() +
+  labs(x = "Season duration",
+       y = "Count",
+       title = "TV Show Duration Distribution",
+       subtitle = "Column Plot, TV Show Duration",
+       caption = "Kaggle: Netflix Movies and TV Shows",
+       fill = "")
+
+# Movie için süre dağılımı grafiği
+ggplot(movie_duration, aes(x = as.factor(duration), y = n, label = n)) +
+  geom_col(fill = "darkgreen") +
+  geom_text(vjust = -0.5, size = 3, col = "white") +
+  theme_minimal() +
+  labs(x = "Movie duration",
+       y = "Count",
+       title = "Movie Duration Distribution",
+       subtitle = "Column Plot, Movie Duration",
+       caption = "Kaggle: Netflix Movies and TV Shows",
+       fill = "")
+
+
+```
+## Doğrusal ilşki İncelemesi
+
+
+Süre ile reyting arasında bir ilişki var mı ?
+Süre ile reyting arasındaki ilişki nasıl görünüyor? Olumlu mu? Olumsuz mu? Doğrusal mı? yoksa Doğrusal değil mi?
+  
+Bu soruların cevabını bulmak için  "duration" ile kategorize edilmiş "rating" arasındaki ilişkiyi gösteren bir scatter plot oluşturalım.
+
+
+```{r}
+p <- ggplot(data = subset(netflix_df, !is.na(duration) & !is.na(rating)), 
+            mapping = aes(x = duration, y = rating)) +
+  geom_point(mapping = aes(color = rating_category)) +
+  geom_smooth() +
+  labs(x = "Duration", y = "Rating") +
+  ggtitle("Relationship between Duration and Rating with Categories") +
+  theme_minimal()
+
+p
+
+```
+
+
+geom_smooth() fonksiyonunun belirli bir analiz yöntemi olan "gam" (Genelleştirilmiş Lineer Modeller) kullanırken bir hesaplama hatasıyla karşılaştığını belirtir. Genellikle bu tür bir uyarı, verilerinizin analiz yöntemine uygun olmadığını veya belirli bir kısıtlama veya hata durumunu gösterir.
+
+"gam" yöntemi yerine "lm" (lineer regresyon) yöntemiyle deneyelim. geom_smooth(method = "lm") şeklinde ayarlayarak doğrusal regresyon analizi yapalım.
+
+
+
+```{r}
+p <- ggplot(data = subset(netflix_df, !is.na(duration) & !is.na(rating)), 
+            mapping = aes(x = duration, y = rating)) +
+  geom_point(mapping = aes(color = rating_category)) +
+  geom_smooth(method = "lm") +
+  labs(x = "Duration", y = "Rating") +
+  ggtitle("Relationship between Duration and Rating with Categories") +
+  theme_minimal()
+
+p
+
+```
+
+Netflix veri kümesi için, gözlemlediğimiz saçılım grafiğinde, her bir kategori için yatay doğrular görüyoruz. Bu durum, duration ile rating arasında anlamlı bir ilişki olmadığını veya ilişkinin çok zayıf olduğunu düşündürebilir. Yatay doğrular, rating değeri değiştikçe durationun neredeyse aynı kaldığını göstermektedir. Bu da, rating değeri ile duration arasında belirgin bir ilişkinin olmadığına işaret etmektedir.
+
+## Ülkeler
+
+Ülkelerin Sıralaması:
+
+```{r}
+netflix %>% select(country) %>%
+  filter(!is.na(country)) %>%
+  mutate(country = fct_lump(country, 45)) %>%
+  group_by(country) %>%
+  summarise(Count = n()) %>%
+  arrange(Count) %>%
+  plot_ly(
+    x = ~ Count ,
+    y = ~ country,
+    type = "bar",
+    orientation = 'h'
+  ) %>%
+  layout(yaxis = list(categoryorder = "array", categoryarray = ~ Count)) %>%
+  layout(
+    title = "Items distribution by Country",
+    yaxis = list(title = "Country"),
+    xaxis = list(title = "Count")
+  )
+```
+
+
+Heatmap
+
+India ile United States için yıllara göre ortalama süreyi incelemek için ısı haritası kullanalım.
+
+```{r}
+heatmap_data <- netflix %>%
+  filter((country == 'India' | country == 'United States') & type == 'Movie' & release_year <= "2020-01-01" & release_year >= "2000-01-01") %>%
+  mutate(movie_duration = as.numeric(gsub(" min", "", duration))) %>%
+#gsub() fonksiyonu kullanılarak 'duration' sütunundaki " min" ifadesi kaldırılır ve sayısal bir değere dönüştürülür.
+  group_by(country, release_year) %>%
+  summarise(mean_duration = mean(movie_duration, na.rm = TRUE), .groups = "drop")
+#summarise() fonksiyonuyla gruplama yapılır ve Ortalama Çalışma Süresi hesaplanır.
+
+ggplot(heatmap_data, aes(x = release_year, y = country, fill = mean_duration)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red") +
+  labs(x = "Yayın Yılı", y = "Ülke", fill = "Ortalama Süre") +
+  theme_bw()
+
+```
+
+Yukarıdaki ısı haritasından yola çıkarak:
+
+India ülkesi 2000'li yılların başlarında ortalama sre olarak 150 değerinden büyükken ilerleyen zaman içerisinde yayın süresini giderek azaltmıştır.
+
+
+United States ise ortalama süre olarak India'dan her zaman daha kısa süreli yayınlar üretirken zaman içerisinde bu süreyi giderek azaltmıştır.
+
+Bu iki ülkede ortak olarak yayın süresi giderek azalmıştır yorumu yapılabilir.
+
+### Veri Tablosu Oluşturma
+
+United Kingdom ülkesine ait verileri içeren bir veri tablosu oluşturalım.
+
+```{r}
+
+if ("season" %in% colnames(netflix)) {
+  netflix <- netflix %>%
+    mutate(
+      genres_min = ifelse(!is.character(genres), NA, parse_number(genres)),
+      season_min = ifelse(!is.character(season), NA, parse_number(season))
+    )
+} else {
+  netflix <- netflix %>%
+    mutate(genres_min = ifelse(!is.character(genres), NA, parse_number(genres)))
+}
+
+datatable(
+  netflix %>% 
+    select(-cast, -description) %>% 
+    filter(!is.na(country), country == "United Kingdom"),
+  caption = NULL,
+  options = list(dom = 't')
+)
+
+
+```
+
+
+Netflix veri kümesindeki "duration" sütunu 200'den büyük olan ve boş olmayan gözlemleri içeren bir veri tablosu oluşturalım.
+
+```{r}
+
+netflix_df <- netflix %>%
+  mutate(duration = as.integer(duration)) %>%
+  filter(!is.na(duration), duration > 200)
+
+datatable(netflix_df[, c("title", "duration")])
+
+
+```
+
+### Word Cloud
+
+ Netflix veri setindeki filmlerin başlıklarını kullanarak bir kelime bulutu oluşturalım.
+
+```{r}
+title_vector <- paste(netflix[,3],collapse = " ")
+
+title_words <- tokenize_words(title_vector) 
+#tokenize_words() fonksiyonu, metni kelimelere ayırır ve title_words değişkenine kaydeder.
+
+title_table<-table(unlist(title_words))
+frequ=cbind.data.frame(words=names(title_table),
+                      countt=as.integer(title_table))
+#cbind.data.frame() fonksiyonu, kelime frekans tablosunu veri çerçevesine dönüştürür.
+
+wc<-frequ %>% 
+  filter(nchar(as.character(words))>3) %>% 
+  arrange(desc(countt))
+cloud=wordcloud(words=wc$words,
+                freq = wc$countt,
+                rot.per=0.40,
+                min.freq = 1,
+                max.words = 100,
+                random.order = F,
+                colors = brewer.pal(8,"Set1"))
+```
+
+## Oyuncular 
+
+
+```{r}
+tp_actors <- netflix %>% 
+  separate_rows(cast,sep=', ') %>% 
+  group_by(cast) %>% 
+  count(sort=TRUE)
+
+tp_a <- tp_actors$cast[2:16]
+tp_a
+```
+
+
+
+
+
+
